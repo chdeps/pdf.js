@@ -1,22 +1,13 @@
-/* Any copyright is dedicated to the Public Domain.
- * http://creativecommons.org/publicdomain/zero/1.0/ */
+import fs from 'fs'
+import util from 'util'
+import path from 'path' 
+import stream from 'stream'
+import pdfjsLib from "pdfjs-dist/legacy/build/pdf.js"
+import { SVGGraphics } from './svg.mjs'
 
-//
-// Node tool to dump SVG output into a file.
-//
+import stubs from './domstubs.js'
+stubs.setStubs(global);
 
-const fs = require("fs");
-const util = require("util");
-const path = require("path");
-const stream = require("stream");
-
-// HACK few hacks to let PDF.js be loaded not as a module in global space.
-require("./domstubs.js").setStubs(global);
-
-// Run `gulp dist-install` to generate 'pdfjs-dist' npm package files.
-const pdfjsLib = require("pdfjs-dist/legacy/build/pdf.js");
-
-// Some PDFs need external cmaps.
 const CMAP_URL = "../../node_modules/pdfjs-dist/cmaps/";
 const CMAP_PACKED = true;
 
@@ -25,11 +16,9 @@ const pdfPath =
   process.argv[2] || "../../web/compressed.tracemonkey-pldi-09.pdf";
 const data = new Uint8Array(fs.readFileSync(pdfPath));
 
-const outputDirectory = "./svgdump";
+const outputDirectory = "./dump";
 
 try {
-  // Note: This creates a directory only one level deep. If you want to create
-  // multiple subdirectories on the fly, use the mkdirp module from npm.
   fs.mkdirSync(outputDirectory);
 } catch (e) {
   if (e.code !== "EEXIST") {
@@ -37,7 +26,6 @@ try {
   }
 }
 
-// Dumps svg outputs to a folder called svgdump
 function getFilePathForPage(pageNum) {
   const name = path.basename(pdfPath, path.extname(pdfPath));
   return path.join(outputDirectory, `${name}-${pageNum}.svg`);
@@ -110,7 +98,7 @@ const loadingTask = pdfjsLib.getDocument({
       console.log();
 
       const opList = await page.getOperatorList();
-      const svgGfx = new pdfjsLib.SVGGraphics(
+      const svgGfx = new SVGGraphics(
         page.commonObjs,
         page.objs,
         /* forceDataSchema = */ true
