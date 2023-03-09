@@ -63,6 +63,10 @@
     "wintersmith": "^2.5.0",
     "yargs": "^17.6.2"
   },
+  "overrides": {
+    "eslint-plugin-prettier": "^4.2.1",
+    "prettier": "^2.8.4"
+  },
   "scripts": {
     "postinstall": "cross-env PUPPETEER_PRODUCT=firefox node node_modules/puppeteer/install.js"
   },
@@ -70,5 +74,9 @@
     "type": "git",
     "url": "git://github.com/mozilla/pdf.js.git"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "dependencies": {
+    "pdfjs-dist": "file:build/dist",
+    "svg-pathdata": "^6.0.3"
+  }
 }

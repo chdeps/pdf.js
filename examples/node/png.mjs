@@ -1,4 +1,5 @@
 import { ImageKind, createObjectURL} from "./utils.mjs";
+import { deflateSync as zDeflateSync } from 'node:zlib' 
 
 export const convertImgDataToPng = (function () {
 	const PNG_HEADER = new Uint8Array([
@@ -90,7 +91,7 @@ export const convertImgDataToPng = (function () {
 				// eslint-disable-next-line no-undef
 				input = Buffer.from(literals);
 			}
-			const output = __non_webpack_require__("zlib").deflateSync(input, {
+			const output = zDeflateSync(input, {
 				level: 9,
 			});
 			return output instanceof Uint8Array ? output : new Uint8Array(output);

@@ -1,5 +1,7 @@
 import { OPS, Util, DOMSVGFactory, TextRenderingMode, IDENTITY_MATRIX, FONT_IDENTITY_MATRIX, createObjectURL, pf, pm} from "./utils.mjs";
 import {convertImgDataToPng} from './png.mjs'
+import { SVGPathData, SVGPathDataTransformer } from "svg-pathdata";
+
 
 const SVG_DEFAULTS = {
   fontStyle: "normal",
@@ -53,10 +55,6 @@ class SVGExtraState {
 
     this.dependencies = [];
 
-    // Clipping
-    this.activeClipUrl = null;
-    this.clipGroup = null;
-
     this.maskId = "";
   }
 
@@ -96,7 +94,6 @@ function opListToTree(opList) {
 // The counts below are relevant for all pages, so they have to be global
 // instead of being members of `SVGGraphics` (which is recreated for
 // each page).
-let clipCount = 0;
 let maskCount = 0;
 let shadingCount = 0;
 
@@ -110,7 +107,6 @@ export class SVGGraphics {
     this.extraStack = [];
     this.commonObjs = commonObjs;
     this.objs = objs;
-    this.pendingClip = null;
     this.pendingEOFill = false;
 
     this.embedFonts = false;
@@ -225,7 +221,7 @@ export class SVGGraphics {
           this.showText(args[0]);
           break;
         case OPS.endText:
-          this.endText();
+          // NOOP
           break;
         case OPS.moveText:
           this.moveText(args[0], args[1]);
@@ -310,10 +306,8 @@ export class SVGGraphics {
           this.eoFillStroke();
           break;
         case OPS.clip:
-          this.clip("nonzero");
-          break;
         case OPS.eoClip:
-          this.clip("evenodd");
+          // NOOP
           break;
         case OPS.paintSolidColorImageMask:
           this.paintSolidColorImageMask();
@@ -359,7 +353,7 @@ export class SVGGraphics {
           );
           break;
         case OPS.constructPath:
-          this.constructPath(args[0], args[1]);
+          this.constructPath(args[0], args[1], args[2]);
           break;
         case OPS.endPath:
           this.endPath();
@@ -377,16 +371,15 @@ export class SVGGraphics {
 
   save() {
     this.transformStack.push(this.transformMatrix);
-    const old = this.current;
-    this.extraStack.push(old);
-    this.current = old.clone();
+    const stack = this.current;
+    this.extraStack.push(stack);
+    this.current = stack.clone();
   }
 
   restore() {
     this.transformMatrix = this.transformStack.pop();
     this.current = this.extraStack.pop();
-    this.pendingClip = null;
-    this.tgrp = null;
+    this._endTransformGroup()
   }
 
   group(items) {
@@ -401,7 +394,11 @@ export class SVGGraphics {
       this.transformMatrix,
       transformMatrix
     );
-    this.tgrp = null;
+    this._endTransformGroup()
+  }
+
+  getRootTransform() {
+    return Util.transform(this.viewport.transform, this.transformMatrix)
   }
 
 /** TEXT */
@@ -497,8 +494,6 @@ export class SVGGraphics {
     const spacingDir = vertical ? 1 : -1;
     const defaultVMetrics = font.defaultVMetrics;
     const widthAdvanceScale = fontSize * current.fontMatrix[0];
-
-    console.log('G', glyphs)
 
     let x = 0;
     for (const glyph of glyphs) {
@@ -704,20 +699,6 @@ export class SVGGraphics {
     current.ycoords = [];
   }
 
-  endText() {
-    const current = this.current;
-    if (
-      current.textRenderingMode & TextRenderingMode.ADD_TO_PATH_FLAG &&
-      current.txtElement?.hasChildNodes()
-    ) {
-      // If no glyphs are shown (i.e. no child nodes), no clipping occurs.
-      current.element = current.txtElement;
-      this.clip("nonzero");
-      this.endPath();
-    }
-  }
-
-
   /** COLOR */
 
   setStrokeColorN(args) {
@@ -915,7 +896,7 @@ export class SVGGraphics {
     this.current.dashPhase = dashPhase;
   }
 
-  constructPath(ops, args) {
+  constructPath(ops, args, bounds) {
     const current = this.current;
     let x = current.x,
       y = current.y;
@@ -1013,68 +994,37 @@ export class SVGGraphics {
       ops[0] !== OPS.rectangle &&
       ops[0] !== OPS.moveTo
     ) {
-      // If a path does not start with an OPS.rectangle or OPS.moveTo, it has
-      // probably been divided into two OPS.constructPath operators by
-      // OperatorList. Append the commands to the previous path element.
       d = current.path.getAttributeNS(null, "d") + d;
     } else {
       current.path = this.svgFactory.createElement("svg:path");
-      this._ensureTransformGroup().append(current.path);
     }
 
     current.path.setAttributeNS(null, "d", d);
     current.path.setAttributeNS(null, "fill", "none");
 
-    // Saving a reference in current.element so that it can be addressed
-    // in 'fill' and 'stroke'
     current.element = current.path;
     current.setCurrentPoint(x, y);
   }
 
   endPath() {
-    const current = this.current;
+    const current = this.current
 
-    // Painting operators end a path.
-    current.path = null;
+    const pathData = new SVGPathData(current.element.getAttributeNS(null, "d"))
+    const bounds = pathData.transform(SVGPathDataTransformer.MATRIX(...this.getRootTransform())).getBounds()
 
-    if (!this.pendingClip) {
-      return;
-    }
-    if (!current.element) {
-      this.pendingClip = null;
-      return;
-    }
+    const isOverlay =
+      bounds.minX < 1 && 
+      bounds.minY < 1 && 
+      bounds.maxX > this.viewport.width - 1 && 
+      bounds.maxY > this.viewport.height - 1
 
-    // Add the current path to a clipping path.
-    const clipId = `clippath${clipCount++}`;
-    const clipPath = this.svgFactory.createElement("svg:clipPath");
-    clipPath.setAttributeNS(null, "id", clipId);
-    clipPath.setAttributeNS(null, "transform", pm(this.transformMatrix));
-
-    // A deep clone is needed when text is used as a clipping path.
-    const clipElement = current.element.cloneNode(true);
-    if (this.pendingClip === "evenodd") {
-      clipElement.setAttributeNS(null, "clip-rule", "evenodd");
-    } else {
-      clipElement.setAttributeNS(null, "clip-rule", "nonzero");
-    }
-    this.pendingClip = null;
-    clipPath.append(clipElement);
-    this.defs.append(clipPath);
-
-    if (current.activeClipUrl) {
-      // The previous clipping group content can go out of order -- resetting
-      // cached clipGroups.
-      current.clipGroup = null;
-      for (const prev of this.extraStack) {
-        prev.clipGroup = null;
-      }
-      // Intersect with the previous clipping path.
-      clipPath.setAttributeNS(null, "clip-path", current.activeClipUrl);
-    }
-    current.activeClipUrl = `url(#${clipId})`;
-
-    this.tgrp = null;
+    if(
+      (current.element.getAttributeNS(null, 'fill') !== 'none' || 
+      !!current.element.getAttributeNS(null, 'stroke')) && !isOverlay
+    ) {
+      this._ensureTransformGroup().append(current.path);
+    }    
+    this._endTransformGroup()
   }
 
   closePath() {
@@ -1083,10 +1033,6 @@ export class SVGGraphics {
       const d = `${current.path.getAttributeNS(null, "d")}Z`;
       current.path.setAttributeNS(null, "d", d);
     }
-  }
-
-  clip(type) {
-    this.pendingClip = type;
   }
 
 
@@ -1262,14 +1208,6 @@ export class SVGGraphics {
     const height = imgData.height;
 
     const imgSrc = convertImgDataToPng(imgData, this.forceDataSchema, !!mask);
-    const cliprect = this.svgFactory.createElement("svg:rect");
-    cliprect.setAttributeNS(null, "x", "0");
-    cliprect.setAttributeNS(null, "y", "0");
-    cliprect.setAttributeNS(null, "width", pf(width));
-    cliprect.setAttributeNS(null, "height", pf(height));
-    this.current.element = cliprect;
-    this.clip("nonzero");
-
     const imgEl = this.svgFactory.createElement("svg:image");
     imgEl.setAttributeNS(XLINK_NS, "xlink:href", imgSrc);
     imgEl.setAttributeNS(null, "x", "0");
@@ -1331,46 +1269,25 @@ export class SVGGraphics {
         matrix[5]
       );
     }
-
-    if (bbox) {
-      const width = bbox[2] - bbox[0];
-      const height = bbox[3] - bbox[1];
-
-      const cliprect = this.svgFactory.createElement("svg:rect");
-      cliprect.setAttributeNS(null, "x", bbox[0]);
-      cliprect.setAttributeNS(null, "y", bbox[1]);
-      cliprect.setAttributeNS(null, "width", pf(width));
-      cliprect.setAttributeNS(null, "height", pf(height));
-      this.current.element = cliprect;
-      this.clip("nonzero");
-      this.endPath();
-    }
   }
 
   paintFormXObjectEnd() {}
 
   /** GROUP */
 
-  _ensureClipGroup() {
-    if (!this.current.clipGroup) {
-      const clipGroup = this.svgFactory.createElement("svg:g");
-      clipGroup.setAttributeNS(null, "clip-path", this.current.activeClipUrl);
-      this.svg.append(clipGroup);
-      this.current.clipGroup = clipGroup;
-    }
-    return this.current.clipGroup;
-  }
-
   _ensureTransformGroup() {
     if (!this.tgrp) {
       this.tgrp = this.svgFactory.createElement("svg:g");
       this.tgrp.setAttributeNS(null, "transform", pm(this.transformMatrix));
-      if (this.current.activeClipUrl) {
-        this._ensureClipGroup().append(this.tgrp);
-      } else {
-        this.svg.append(this.tgrp);
-      }
+      this.svg.append(this.tgrp);
     }
     return this.tgrp;
   }
+
+  _endTransformGroup() {
+    if(!this.tgrp) return
+    if(!this.tgrp.childNodes.length) this.svg.removeChild(this.tgrp)
+    this.tgrp = null
+  }
+
 };

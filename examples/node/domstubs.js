@@ -116,6 +116,13 @@ DOMElement.prototype = {
     }
   },
 
+  removeChild: function DOMElement_appendChild(element) {
+    const childNodes = this.childNodes;
+    if (childNodes.indexOf(element) < 0) return
+    childNodes.splice(childNodes.indexOf(element), 1)
+  },
+
+
   hasChildNodes: function DOMElement_hasChildNodes() {
     return this.childNodes.length !== 0;
   },

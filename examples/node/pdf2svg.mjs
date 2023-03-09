@@ -13,7 +13,7 @@ const CMAP_PACKED = true;
 
 // Loading file from file system into typed array
 const pdfPath =
-  process.argv[2] || "../../web/compressed.tracemonkey-pldi-09.pdf";
+  process.argv[2] || "./test4.pdf";
 const data = new Uint8Array(fs.readFileSync(pdfPath));
 
 const outputDirectory = "./dump";
@@ -95,9 +95,8 @@ const loadingTask = pdfjsLib.getDocument({
       console.log(`# Page ${pageNum}`);
       const viewport = page.getViewport({ scale: 1.0 });
       console.log(`Size: ${viewport.width}x${viewport.height}`);
-      console.log();
 
-      const opList = await page.getOperatorList();
+      const opList = await page.getOperatorList({intent: 'print'});
       const svgGfx = new SVGGraphics(
         page.commonObjs,
         page.objs,
