@@ -13,7 +13,7 @@ const CMAP_PACKED = true;
 
 // Loading file from file system into typed array
 const pdfPath =
-  process.argv[2] || "./test4.pdf";
+  process.argv[2] || "./test3.pdf";
 const data = new Uint8Array(fs.readFileSync(pdfPath));
 
 const outputDirectory = "./dump";

@@ -75,13 +75,11 @@ function opListToTree(opList) {
 
   for (const opListElement of opList) {
     if (opListElement.fn === "save") {
-      opTree.push({ fnId: 92, fn: "group", items: [] });
+      opTree.push({ fnId: OPS.group, fn: "group", items: [] });
       tmp.push(opTree);
       opTree = opTree.at(-1).items;
       continue;
-    }
-
-    if (opListElement.fn === "restore") {
+    } else if (opListElement.fn === "restore") {
       opTree = tmp.pop();
     } else {
       opTree.push(opListElement);
@@ -193,6 +191,7 @@ export class SVGGraphics {
   }
 
   executeOpTree(opTree) {
+    console.log('OPS', opTree)
     for (const opTreeElement of opTree) {
       const fn = opTreeElement.fn;
       const fnId = opTreeElement.fnId;
@@ -358,7 +357,7 @@ export class SVGGraphics {
         case OPS.endPath:
           this.endPath();
           break;
-        case 92:
+        case OPS.group:
           this.group(opTreeElement.items);
           break;
         default:

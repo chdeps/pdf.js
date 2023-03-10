@@ -95,6 +95,7 @@ export const OPS = {
   paintImageMaskXObjectRepeat: 89,
   paintSolidColorImageMask: 90,
   constructPath: 91,
+  group: 92
 };
 
 
